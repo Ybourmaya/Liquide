@@ -9,6 +9,7 @@ import { LiquidReportDocument } from "./LiquidReport";
 import { Transaction, TransactionCategory } from "@/lib/types/finance";
 import { useFinanceStore } from "@/lib/store";
 import { QuickCommandDock } from "./QuickCommandDock";
+import { ThreeDLoader } from "./ThreeDLoader";
 import { CoreDispatcher } from "@/lib/agents";
 import { cn } from "@/lib/utils";
 import { 
@@ -226,16 +227,7 @@ export function Dashboard() {
   };
 
   if (!isLoaded || !hasHydrated) {
-    return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center font-mono relative overflow-hidden">
-        <div className="absolute inset-0 bg-noise opacity-2" />
-        <div className="absolute inset-0 saturate-[1.8] opacity-60">
-          <div className="w-[300vw] h-full bg-[linear-gradient(90deg,transparent_20%,cyan_45%,emerald_55%,transparent_80%)] opacity-30 blur-[60px] animate-[shimmer_3s_infinite_linear] pointer-events-none" />
-        </div>
-        <Loader2 className="w-8 h-8 text-emerald-400 animate-spin mb-6 relative z-10" />
-        <p className="text-emerald-300/80 tracking-[0.2em] uppercase text-sm relative z-10">Decrypting Financial Data...</p>
-      </div>
-    );
+    return <ThreeDLoader />;
   }
 
   return (
