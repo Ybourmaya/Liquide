@@ -8,9 +8,11 @@ import {
   YAxis,
   Tooltip,
   ResponsiveContainer,
+  CartesianGrid,
 } from "recharts";
 import type { TooltipContentProps } from "recharts/types/component/Tooltip";
 import { Transaction } from '@/lib/types/finance';
+import { convertAmount, formatAmount, normalizeCurrencyCode } from "@/lib/currency";
 
 type ChartDatum = {
   name: string;
@@ -22,11 +24,13 @@ interface CashflowChartProps {
   data: Transaction[];
   hypotheticalTx?: Transaction | null;
   currencySymbol: string;
+  currencyCode: string;
 }
 
-function formatCurrency(value: number | undefined, currencySymbol: string): string {
+function formatCurrency(value: number | undefined, currencySymbol: string, currencyCode: string): string {
   if (typeof value !== "number") return "—";
-  return `${currencySymbol}${value.toFixed(2)}`;
+  const formatted = formatAmount(value, currencyCode);
+  return formatted.includes(currencySymbol) ? formatted : `${currencySymbol}${value.toFixed(2)}`;
 }
 
 function GlassTooltipContent({
@@ -34,7 +38,8 @@ function GlassTooltipContent({
   payload,
   label,
   currencySymbol,
-}: Partial<TooltipContentProps<number, string>> & { currencySymbol: string }) {
+  currencyCode,
+}: Partial<TooltipContentProps<number, string>> & { currencySymbol: string; currencyCode: string }) {
   const actual =
     payload?.find((p) => p.dataKey === "actualBalance")?.value as number | undefined;
   const projected =
@@ -56,7 +61,7 @@ function GlassTooltipContent({
               <div className="flex items-center justify-between gap-4">
                 <span className="text-[10px] text-emerald-300/80">Actual</span>
                 <span className="text-[11px] font-mono text-emerald-100">
-                  {formatCurrency(actual, currencySymbol)}
+                  {formatCurrency(actual, currencySymbol, currencyCode)}
                 </span>
               </div>
             )}
@@ -64,7 +69,7 @@ function GlassTooltipContent({
               <div className="flex items-center justify-between gap-4">
                 <span className="text-[10px] text-purple-300/80">Projected</span>
                 <span className="text-[11px] font-mono text-purple-100">
-                  {formatCurrency(projected, currencySymbol)}
+                  {formatCurrency(projected, currencySymbol, currencyCode)}
                 </span>
               </div>
             )}
@@ -79,13 +84,19 @@ export function CashflowChart({
   data: transactions,
   hypotheticalTx,
   currencySymbol,
+  currencyCode,
 }: CashflowChartProps) {
   // Compute rolling balance over time (chronological). We should reverse because transactions is prepended.
   const chartData = useMemo(() => {
     let balance = 0;
     const sorted = [...transactions].reverse();
     const actuals: ChartDatum[] = sorted.map((tx, index) => {
-      balance = tx.category === 'Income' ? balance + tx.amount : balance - tx.amount;
+      const converted = convertAmount(
+        tx.amount,
+        normalizeCurrencyCode(tx.currency || currencyCode),
+        normalizeCurrencyCode(currencyCode)
+      );
+      balance = tx.category === 'Income' ? balance + converted : balance - converted;
       return {
         name: `Tx ${index + 1}`,
         actualBalance: balance,
@@ -106,17 +117,36 @@ export function CashflowChart({
     
     // Apply hypothetical transaction instantly onto the projection line
     if (hypotheticalTx) {
-      currentProjBalance = hypotheticalTx.category === 'Income' ? currentProjBalance + hypotheticalTx.amount : currentProjBalance - hypotheticalTx.amount;
+      const hypotheticalConverted = convertAmount(
+        hypotheticalTx.amount,
+        normalizeCurrencyCode(hypotheticalTx.currency || currencyCode),
+        normalizeCurrencyCode(currencyCode)
+      );
+      currentProjBalance = hypotheticalTx.category === 'Income'
+        ? currentProjBalance + hypotheticalConverted
+        : currentProjBalance - hypotheticalConverted;
     }
 
     // Determine basic trend from last few transactions
     let trend = 0;
     if (sorted.length > 1) {
        const recentTxs = sorted.slice(-3);
-       const netChange = recentTxs.reduce((acc, tx) => tx.category === 'Income' ? acc + tx.amount : acc - tx.amount, 0);
+       const netChange = recentTxs.reduce((acc, tx) => {
+        const converted = convertAmount(
+          tx.amount,
+          normalizeCurrencyCode(tx.currency || currencyCode),
+          normalizeCurrencyCode(currencyCode)
+        );
+        return tx.category === 'Income' ? acc + converted : acc - converted;
+       }, 0);
        trend = netChange / recentTxs.length; // Average change per recent tx
     } else if (sorted.length === 1) {
-       trend = sorted[0].category === 'Income' ? sorted[0].amount : -sorted[0].amount;
+       const converted = convertAmount(
+        sorted[0].amount,
+        normalizeCurrencyCode(sorted[0].currency || currencyCode),
+        normalizeCurrencyCode(currencyCode)
+       );
+       trend = sorted[0].category === 'Income' ? converted : -converted;
     }
 
     const projections: ChartDatum[] = [];
@@ -131,7 +161,7 @@ export function CashflowChart({
     }
 
     return [...actuals, ...projections];
-  }, [transactions, hypotheticalTx]);
+  }, [transactions, hypotheticalTx, currencyCode]);
 
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -149,6 +179,7 @@ export function CashflowChart({
             <stop offset="95%" stopColor="#3b0764" stopOpacity={0}/>
           </linearGradient>
         </defs>
+        <CartesianGrid stroke="rgba(16,185,129,0.1)" strokeDasharray="4 6" vertical={false} />
         <XAxis 
           dataKey="name" 
           axisLine={false} 
@@ -158,7 +189,7 @@ export function CashflowChart({
         />
         <YAxis hide />
         <Tooltip
-          content={<GlassTooltipContent currencySymbol={currencySymbol} />}
+          content={<GlassTooltipContent currencySymbol={currencySymbol} currencyCode={currencyCode} />}
           filterNull
         />
         <Area 

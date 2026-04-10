@@ -1,4 +1,32 @@
 import { Transaction, TransactionCategory } from "../types/finance";
+import { normalizeCurrencyCode } from "../currency";
+
+const SYMBOL_TO_CODE: Record<string, string> = {
+  "$": "USD",
+  "€": "EUR",
+  "£": "GBP",
+  "¥": "JPY",
+  "₹": "INR",
+};
+
+function detectCurrencyCode(input: string): string | undefined {
+  const lowerInput = input.toLowerCase();
+  if (lowerInput.match(/(dh|mad|dirham)/)) return "MAD";
+  if (lowerInput.match(/(€|eur|euro)/)) return "EUR";
+  if (lowerInput.match(/(\$|usd|dollar)/)) return "USD";
+  if (lowerInput.match(/(gbp|pound|sterling|£)/)) return "GBP";
+  if (lowerInput.match(/(jpy|yen|¥)/)) return "JPY";
+  if (lowerInput.match(/(cad|c\$|canadian)/)) return "CAD";
+  if (lowerInput.match(/(aud|a\$|australian)/)) return "AUD";
+  if (lowerInput.match(/(inr|rupee|₹)/)) return "INR";
+
+  const codeMatch = input.toUpperCase().match(/\b([A-Z]{3})\b/);
+  if (codeMatch?.[1]) return normalizeCurrencyCode(codeMatch[1]);
+
+  const symbolMatch = input.match(/[$€£¥₹]/);
+  if (symbolMatch?.[0]) return SYMBOL_TO_CODE[symbolMatch[0]];
+  return undefined;
+}
 
 export class CoreDispatcher {
   static async processInput(input: string): Promise<Transaction | null> {
@@ -6,13 +34,10 @@ export class CoreDispatcher {
 
     const lowerInput = input.toLowerCase();
 
-    const amountMatch = lowerInput.match(/(?:spent|cost|paid|gave|got|earned|received|made|)[\s\$€£]*(\d+(?:\.\d{1,2})?)/);
+    const amountMatch = lowerInput.match(/(?:spent|cost|paid|gave|got|earned|received|made|add|added|deposit|deposited)?[\s\$€£¥₹]*(-?\d+(?:\.\d{1,2})?)/);
     const amount = amountMatch ? parseFloat(amountMatch[1]) : 0;
 
-    let currencyFallback: "USD" | "MAD" | "EUR" | undefined = undefined;
-    if (lowerInput.match(/(dh|mad|dirham)/)) currencyFallback = "MAD";
-    else if (lowerInput.match(/(€|eur|euro)/)) currencyFallback = "EUR";
-    else if (lowerInput.match(/(\$|usd|dollar)/)) currencyFallback = "USD";
+    const currencyFallback = detectCurrencyCode(input);
 
     let category: TransactionCategory = "Uncategorized";
     let baseConfidence = 0.6; // lower default confidence
@@ -43,7 +68,7 @@ export class CoreDispatcher {
       category,
       date: new Date().toISOString(),
       confidence: parseFloat(confidence.toFixed(2)), 
-      currency: currencyFallback,
+      currency: currencyFallback ? normalizeCurrencyCode(currencyFallback) : undefined,
     };
   }
 

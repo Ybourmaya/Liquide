@@ -8,7 +8,7 @@ export type TransactionCategory =
   | "Income"
   | "Uncategorized";
 
-export type Currency = "USD" | "MAD" | "EUR";
+export type Currency = string;
 
 export interface Transaction {
   id: string;

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { Transaction, Currency } from "./types/finance";
+import { convertAmount, normalizeCurrencyCode } from "./currency";
 
 interface FinanceState {
   transactions: Transaction[];
@@ -46,14 +47,17 @@ export const useFinanceStore = create<FinanceState>()(
          }));
       },
       getBalance: () => {
+        const targetCurrency = normalizeCurrencyCode(get().currency);
         return get().transactions.reduce((acc, tx) => {
+          const txCurrency = normalizeCurrencyCode(tx.currency);
+          const normalizedAmount = convertAmount(tx.amount, txCurrency, targetCurrency);
           if (tx.category === "Income") {
-            return acc + tx.amount;
+            return acc + normalizedAmount;
           }
-          return acc - tx.amount;
+          return acc - normalizedAmount;
         }, 0);
       },
-      setCurrency: (currency) => set({ currency }),
+      setCurrency: (currency) => set({ currency: normalizeCurrencyCode(currency) }),
       setHasHydrated: (state) => set({ hasHydrated: state }),
     }),
     {

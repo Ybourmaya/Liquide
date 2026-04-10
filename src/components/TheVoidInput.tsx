@@ -11,6 +11,7 @@ interface TheVoidInputProps {
   onHypotheticalLog?: (transaction: Transaction | null) => void;
   quickCommand?: { text: string; id: number };
   onCommandAction?: (command: string) => void;
+  currencySymbol: string;
 }
 
 function detectCommandIntent(rawInput: string): "analyze-risk" | "forecast-q3" | null {
@@ -26,6 +27,7 @@ export function TheVoidInput({
   onHypotheticalLog,
   quickCommand,
   onCommandAction,
+  currencySymbol,
 }: TheVoidInputProps) {
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
@@ -186,7 +188,7 @@ export function TheVoidInput({
                 <div className="absolute inset-0 rounded-2xl border border-emerald-400/40 animate-[shimmer_2s_infinite] [background:linear-gradient(90deg,transparent,rgba(52,211,153,0.2),transparent)] [background-size:200%_100%] pointer-events-none" />
                 <div className="text-emerald-100 text-sm tracking-widest uppercase font-medium relative z-10">Pending Transaction</div>
                 <div className="text-4xl font-light text-white font-mono tabular-nums relative z-10">
-                  {preview.category === 'Income' ? '+' : '-'}${preview.amount?.toFixed(2)}
+                  {preview.category === 'Income' ? '+' : '-'}{currencySymbol}{preview.amount?.toFixed(2)}
                 </div>
                 {preview.currency && (
                   <div className="px-2 py-0.5 rounded text-[10px] bg-white/10 text-white/70 uppercase relative z-10 tracking-widest">
@@ -240,7 +242,7 @@ export function TheVoidInput({
                              </span>
                            )}
                            <span className="text-xl tracking-tight text-white font-mono tabular-nums">
-                             {preview.category === 'Income' ? '+' : '-'}${preview.amount.toFixed(2)}
+                            {preview.category === 'Income' ? '+' : '-'}{currencySymbol}{preview.amount.toFixed(2)}
                            </span>
                          </div>
                          {preview.currency && <span className="text-[10px] text-emerald-400/80 mr-1 mt-1 uppercase">Matches {preview.currency}</span>}

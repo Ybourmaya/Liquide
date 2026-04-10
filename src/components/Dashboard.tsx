@@ -12,6 +12,12 @@ import { QuickCommandDock } from "./QuickCommandDock";
 import { ThreeDLoader } from "./ThreeDLoader";
 import { CoreDispatcher } from "@/lib/agents";
 import { cn } from "@/lib/utils";
+import {
+  convertAmount,
+  formatAmount,
+  getCurrencySymbol,
+  normalizeCurrencyCode,
+} from "@/lib/currency";
 import { 
   Wallet, 
   TrendingUp, 
@@ -21,16 +27,32 @@ import {
   Gamepad2, 
   ShoppingCart, 
   Home, 
+  Bolt,
   ArrowUpCircle,
   HelpCircle,
   Trash2,
   Download,
   Loader2,
   X,
-  Globe
+  Globe,
+  Landmark,
+  ShieldAlert
 } from "lucide-react";
 
 export function Dashboard() {
+  const availableCurrencies = [
+    "USD",
+    "MAD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "CAD",
+    "AUD",
+    "CHF",
+    "CNY",
+    "INR",
+  ];
+
   const [isLoaded, setIsLoaded] = useState(false);
   const [isSkeletonsLoaded, setIsSkeletonsLoaded] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -47,6 +69,7 @@ export function Dashboard() {
   const hasHydrated = useFinanceStore((state) => state.hasHydrated);
   const currency = useFinanceStore((state) => state.currency);
   const setCurrency = useFinanceStore((state) => state.setCurrency);
+  const normalizedCurrency = normalizeCurrencyCode(currency);
   
   // Wait for hydration before showing the shimmer load
   useEffect(() => {
@@ -68,15 +91,18 @@ export function Dashboard() {
 
   const handleTransactionLogged = (transaction: Transaction) => {
     // If the Categorization Agent parses a specific currency, adapt global settings seamlessly.
-    if (transaction.currency && transaction.currency !== currency) {
-      setCurrency(transaction.currency);
+    const txCurrency = normalizeCurrencyCode(transaction.currency || normalizedCurrency);
+    const normalizedTx = { ...transaction, currency: txCurrency };
+
+    if (txCurrency !== normalizedCurrency) {
+      setCurrency(txCurrency);
       // Let it trigger insight about currency change
-      addInsight(`Note: Currency adapted to ${transaction.currency} based on input.`);
+      addInsight(`Note: Currency adapted to ${txCurrency} based on input.`);
     }
 
-    useFinanceStore.getState().addTransaction(transaction);
+    useFinanceStore.getState().addTransaction(normalizedTx);
     // Generate an insight instantly on entry
-    const newInsight = CoreDispatcher.generatePlausibleInsight(transactions, transaction);
+    const newInsight = CoreDispatcher.generatePlausibleInsight(transactions, normalizedTx);
     if (!insights.includes(newInsight)) addInsight(newInsight);
     setHypotheticalTx(null);
   };
@@ -90,6 +116,7 @@ export function Dashboard() {
       case "Entertainment": return <Gamepad2 className="w-4 h-4 text-emerald-300" />;
       case "Shopping": return <ShoppingCart className="w-4 h-4 text-emerald-400" />;
       case "Housing": return <Home className="w-4 h-4 text-emerald-600" />;
+      case "Utilities": return <Bolt className="w-4 h-4 text-cyan-300" />;
       case "Income": return <ArrowUpCircle className="w-4 h-4 text-green-400" />;
       default: return <HelpCircle className="w-4 h-4 text-emerald-800" />;
     }
@@ -99,12 +126,13 @@ export function Dashboard() {
     const breakdown: Record<string, number> = {};
     transactions.forEach(tx => {
       if (tx.category === "Income") return; 
-      breakdown[tx.category] = (breakdown[tx.category] || 0) + tx.amount;
+      const converted = convertAmount(tx.amount, tx.currency || normalizedCurrency, normalizedCurrency);
+      breakdown[tx.category] = (breakdown[tx.category] || 0) + converted;
     });
     return Object.entries(breakdown).sort((a,b) => b[1] - a[1]);
   };
 
-  const currencySymbol = currency === 'USD' ? '$' : currency === 'EUR' ? '€' : 'DH';
+  const currencySymbol = getCurrencySymbol(normalizedCurrency);
 
   const transactionCategories: TransactionCategory[] = [
     "Food/Drink",
@@ -135,6 +163,11 @@ export function Dashboard() {
       ? transactions
       : transactions.filter((tx) => tx.category === ledgerCategoryFilter);
 
+  const toDisplayAmount = (tx: Transaction): number => {
+    const fromCode = normalizeCurrencyCode(tx.currency || normalizedCurrency);
+    return convertAmount(tx.amount, fromCode, normalizedCurrency);
+  };
+
   const handleExportLiquidReport = async () => {
     setIsDownloading(true);
     try {
@@ -148,7 +181,7 @@ export function Dashboard() {
         <LiquidReportDocument
           transactions={ledgerItemsForExport}
           insights={insights}
-          currencySymbol={currencySymbol}
+          currencyCode={normalizedCurrency}
           ledgerFilter={ledgerCategoryFilter}
           generatedAtISO={new Date().toISOString()}
         />
@@ -182,10 +215,10 @@ export function Dashboard() {
 
       const incomeTotal = transactions
         .filter((tx) => tx.category === "Income")
-        .reduce((sum, tx) => sum + tx.amount, 0);
+        .reduce((sum, tx) => sum + toDisplayAmount(tx), 0);
       const expenseTotal = transactions
         .filter((tx) => tx.category !== "Income")
-        .reduce((sum, tx) => sum + tx.amount, 0);
+        .reduce((sum, tx) => sum + toDisplayAmount(tx), 0);
 
       const spendRatio = incomeTotal > 0 ? (expenseTotal / incomeTotal) * 100 : 100;
       const cappedRisk = Math.min(99, Math.max(5, Math.round(spendRatio)));
@@ -206,7 +239,7 @@ export function Dashboard() {
       }
 
       const netFlow = transactions.reduce(
-        (sum, tx) => (tx.category === "Income" ? sum + tx.amount : sum - tx.amount),
+        (sum, tx) => (tx.category === "Income" ? sum + toDisplayAmount(tx) : sum - toDisplayAmount(tx)),
         0
       );
       const avgNetPerTx = netFlow / transactions.length;
@@ -214,7 +247,7 @@ export function Dashboard() {
 
       const polarity = projectedQ3Delta >= 0 ? "positive" : "negative";
       addInsight(
-        `Note: Forecast Q3 models a ${polarity} delta of ${currencySymbol}${Math.abs(projectedQ3Delta).toFixed(2)} based on current flow velocity.`
+        `Note: Forecast Q3 models a ${polarity} delta of ${formatAmount(Math.abs(projectedQ3Delta), normalizedCurrency)} based on current flow velocity.`
       );
     }
   };
@@ -244,18 +277,32 @@ export function Dashboard() {
       <div className="w-full max-w-4xl text-center space-y-3 z-10 pt-4 relative">
         {/* Currency Switcher */}
         <motion.div 
-          key={currency}
+          key={normalizedCurrency}
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ type: "spring", bounce: 0.5 }}
-          className="absolute right-0 top-0 hidden md:flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-3 py-1.5 backdrop-blur-md cursor-pointer hover:bg-white/10 transition group"
-          onClick={() => {
-            const next = currency === 'USD' ? 'EUR' : currency === 'EUR' ? 'MAD' : 'USD';
-            setCurrency(next);
-          }}
+          className="absolute right-0 top-0 hidden md:flex items-center gap-2 bg-white/5 border border-white/10 rounded-full px-3 py-1.5 backdrop-blur-md transition group"
         >
           <Globe className="w-4 h-4 text-emerald-400 group-hover:rotate-45 transition-transform duration-500" />
-          <span className="text-xs text-emerald-100 font-medium tracking-widest">{currency}</span>
+          <select
+            value={normalizedCurrency}
+            onChange={(e) => setCurrency(normalizeCurrencyCode(e.target.value))}
+            className="bg-transparent text-xs text-emerald-100 font-medium tracking-widest outline-none"
+          >
+            {availableCurrencies.map((code) => (
+              <option key={code} value={code} className="bg-slate-900 text-emerald-100">
+                {code}
+              </option>
+            ))}
+          </select>
+          <input
+            type="text"
+            defaultValue={normalizedCurrency}
+            onBlur={(e) => setCurrency(normalizeCurrencyCode(e.target.value))}
+            className="w-14 bg-transparent text-xs text-emerald-300/80 border-l border-white/10 pl-2 uppercase outline-none"
+            maxLength={3}
+            aria-label="Custom currency code"
+          />
         </motion.div>
 
         <h1 className="text-5xl md:text-6xl font-medium tracking-tighter text-white drop-shadow-sm">
@@ -268,8 +315,7 @@ export function Dashboard() {
         <div className="pt-10 pb-6 flex flex-col items-center">
           <p className="text-xs uppercase tracking-[0.25em] text-emerald-400/80 font-medium mb-3">Total Asset Value</p>
           <div className="text-6xl md:text-7xl font-extralight tracking-tighter text-white font-mono inline-block tabular-nums transition-all">
-            <span className="text-emerald-500/50 mr-1">{currencySymbol}</span>
-            {currentBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {formatAmount(currentBalance, normalizedCurrency)}
           </div>
         </div>
       </div>
@@ -280,6 +326,7 @@ export function Dashboard() {
           onHypotheticalLog={setHypotheticalTx}
           quickCommand={quickCommand}
           onCommandAction={handleCommandAction}
+          currencySymbol={currencySymbol}
         />
       </div>
 
@@ -300,6 +347,7 @@ export function Dashboard() {
                     data={transactions}
                     hypotheticalTx={hypotheticalTx}
                     currencySymbol={currencySymbol}
+                    currencyCode={normalizedCurrency}
                   />
                  )}
                </div>
@@ -311,7 +359,7 @@ export function Dashboard() {
           {/* Spend Categories */}
           <BentoGridItem
             layoutId="card-spending"
-            title="Spending Breakdown"
+            title={<span className="inline-flex items-center gap-2"><Landmark className="w-4 h-4 text-emerald-300" /> Spending Breakdown</span>}
             description="Top areas of recent expenditure."
             onClick={() => setSelectedCard('spending')}
             header={
@@ -326,7 +374,7 @@ export function Dashboard() {
                            {getCategoryIcon(cat as TransactionCategory)}
                            <span className="text-sm text-emerald-100 group-hover:text-emerald-300 transition-colors">{cat}</span>
                          </div>
-                         <span className="text-emerald-400 font-mono tabular-nums text-sm">{currencySymbol}{amt.toFixed(2)}</span>
+                         <span className="text-emerald-400 font-mono tabular-nums text-sm">{formatAmount(amt, normalizedCurrency)}</span>
                       </div>
                     ))}
                     {getCategoryBreakdown().length === 0 && (
@@ -393,7 +441,7 @@ export function Dashboard() {
                          </div>
                          <div className="flex items-center gap-4">
                            <span className={`font-mono tabular-nums px-2 py-1 rounded bg-black/20 ${tx.category === 'Income' ? 'text-green-400 font-semibold border border-green-500/20 shadow-[0_0_10px_rgba(74,222,128,0.1)]' : 'text-emerald-400'}`}>
-                             {tx.category === 'Income' ? '+' : '-'}{currencySymbol}{tx.amount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                             {tx.category === 'Income' ? '+' : '-'}{formatAmount(toDisplayAmount(tx), normalizedCurrency)}
                            </span>
                            <button onClick={() => removeTransaction(tx.id)} className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-900/30 text-emerald-600 hover:text-red-400 rounded transition-all">
                              <Trash2 className="w-4 h-4" />
@@ -419,6 +467,7 @@ export function Dashboard() {
             title={
               <div className="flex items-center gap-2">
                 <span>Liquid AI Intelligence</span>
+                <ShieldAlert className="w-3.5 h-3.5 text-emerald-300/90" />
                 <span className="relative flex h-2 w-2">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
@@ -508,6 +557,7 @@ export function Dashboard() {
                    data={transactions}
                    hypotheticalTx={hypotheticalTx}
                    currencySymbol={currencySymbol}
+                   currencyCode={normalizedCurrency}
                  />
                </div>
             </motion.div>
@@ -540,7 +590,7 @@ export function Dashboard() {
                            </div>
                            <div className="flex items-center gap-4 text-sm">
                              <span className="bg-emerald-950/50 px-2 py-1 rounded text-emerald-400/80 tabular-nums">{percent}%</span>
-                             <span className="text-emerald-400 font-mono tabular-nums text-lg">{currencySymbol}{amt.toFixed(2)}</span>
+                             <span className="text-emerald-400 font-mono tabular-nums text-lg">{formatAmount(amt, normalizedCurrency)}</span>
                            </div>
                         </div>
                         <div className="w-full h-1.5 bg-emerald-950/50 rounded-full overflow-hidden mt-1 relative">

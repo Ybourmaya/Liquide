@@ -1,11 +1,12 @@
 import React from "react";
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import type { Transaction, TransactionCategory } from "@/lib/types/finance";
+import { convertAmount, formatAmount, normalizeCurrencyCode } from "@/lib/currency";
 
 export interface LiquidReportDocumentProps {
   transactions: Transaction[];
   insights: string[];
-  currencySymbol: string;
+  currencyCode: string;
   ledgerFilter: TransactionCategory | "All";
   generatedAtISO: string;
 }
@@ -28,7 +29,7 @@ const styles = StyleSheet.create({
   content: {
     position: "relative",
     flexDirection: "column",
-    gap: 16,
+    gap: 14,
   },
   header: {
     borderBottomWidth: 1,
@@ -50,6 +51,28 @@ const styles = StyleSheet.create({
     fontWeight: 700,
     color: "#10b981",
     marginBottom: 8,
+  },
+  summaryGrid: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  summaryCard: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.2)",
+    borderRadius: 10,
+    backgroundColor: "rgba(2, 44, 34, 0.3)",
+    padding: 10,
+  },
+  summaryLabel: {
+    fontSize: 10,
+    color: "rgba(229, 231, 235, 0.7)",
+    marginBottom: 3,
+  },
+  summaryValue: {
+    fontSize: 12,
+    color: "#34d399",
+    fontWeight: 700,
   },
   metaRow: {
     flexDirection: "row",
@@ -138,9 +161,9 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" });
 }
 
-function formatAmount(tx: Transaction, currencySymbol: string): string {
+function formatSignedAmount(tx: Transaction, amount: number, currencyCode: string): string {
   const sign = tx.category === "Income" ? "+" : "-";
-  return `${sign}${currencySymbol}${tx.amount.toFixed(2)}`;
+  return `${sign}${formatAmount(amount, currencyCode)}`;
 }
 
 function truncate(input: string, maxChars: number): string {
@@ -151,14 +174,29 @@ function truncate(input: string, maxChars: number): string {
 export function LiquidReportDocument({
   transactions,
   insights,
-  currencySymbol,
+  currencyCode,
   ledgerFilter,
   generatedAtISO,
 }: LiquidReportDocumentProps) {
+  const displayCode = normalizeCurrencyCode(currencyCode);
   const generatedAtLabel = formatDate(generatedAtISO);
-  const ledgerItems = transactions.slice(0, 30);
+  const ledgerItems = transactions.slice(0, 36);
   const remaining = Math.max(0, transactions.length - ledgerItems.length);
   const insightItems = insights.slice(0, 10);
+  const spendingByCategory = transactions.reduce<Record<string, number>>((acc, tx) => {
+    if (tx.category === "Income") return acc;
+    const converted = convertAmount(tx.amount, tx.currency || displayCode, displayCode);
+    acc[tx.category] = (acc[tx.category] ?? 0) + converted;
+    return acc;
+  }, {});
+
+  const totalIncome = transactions
+    .filter((tx) => tx.category === "Income")
+    .reduce((sum, tx) => sum + convertAmount(tx.amount, tx.currency || displayCode, displayCode), 0);
+  const totalExpense = transactions
+    .filter((tx) => tx.category !== "Income")
+    .reduce((sum, tx) => sum + convertAmount(tx.amount, tx.currency || displayCode, displayCode), 0);
+  const netBalance = totalIncome - totalExpense;
 
   const ledgerFilterLabel = ledgerFilter === "All" ? "All categories" : ledgerFilter;
 
@@ -170,12 +208,50 @@ export function LiquidReportDocument({
           <View style={styles.header}>
             <Text style={styles.title}>Liquid Report</Text>
             <Text style={styles.subtitle}>
-              Dark-emerald export for {generatedAtLabel}
+              Multi-currency financial history export · {generatedAtLabel}
             </Text>
           </View>
 
+          <View style={styles.summaryGrid}>
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>Income</Text>
+              <Text style={styles.summaryValue}>{formatAmount(totalIncome, displayCode)}</Text>
+            </View>
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>Expenses</Text>
+              <Text style={styles.summaryValue}>{formatAmount(totalExpense, displayCode)}</Text>
+            </View>
+            <View style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>Net</Text>
+              <Text style={styles.summaryValue}>{formatAmount(netBalance, displayCode)}</Text>
+            </View>
+          </View>
+
           <View>
-            <Text style={styles.sectionTitle}>Ledger</Text>
+            <Text style={styles.sectionTitle}>Spending Distribution</Text>
+            {Object.keys(spendingByCategory).length === 0 ? (
+              <Text style={styles.empty}>No spending categories available yet.</Text>
+            ) : (
+              <View style={styles.list}>
+                {Object.entries(spendingByCategory)
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 6)
+                  .map(([category, amount]) => (
+                    <View key={category} style={styles.item}>
+                      <View style={styles.itemRow}>
+                        <Text style={styles.category}>{category}</Text>
+                        <Text style={[styles.amount, styles.amountNegative]}>
+                          {formatAmount(amount, displayCode)}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+              </View>
+            )}
+          </View>
+
+          <View>
+            <Text style={styles.sectionTitle}>Spending History</Text>
             <View style={styles.metaRow}>
               <Text style={styles.metaLabel}>Filter</Text>
               <Text style={styles.metaValue}>{ledgerFilterLabel}</Text>
@@ -199,10 +275,17 @@ export function LiquidReportDocument({
                           tx.category === "Income" ? styles.amountPositive : styles.amountNegative,
                         ]}
                       >
-                        {formatAmount(tx, currencySymbol)}
+                        {formatSignedAmount(
+                          tx,
+                          convertAmount(tx.amount, tx.currency || displayCode, displayCode),
+                          displayCode
+                        )}
                       </Text>
                     </View>
                     <Text style={styles.description}>{truncate(tx.description, 140)}</Text>
+                    <Text style={styles.footerHint}>
+                      Original: {formatAmount(tx.amount, tx.currency || displayCode)}
+                    </Text>
                     <Text style={styles.date}>{formatDate(tx.date)}</Text>
                   </View>
                 ))}
